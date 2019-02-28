@@ -1,0 +1,302 @@
+---
+title: "Manipal Call center Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: scroll
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(flexdashboard)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(plotly)
+library(wordcloud)
+library(tm)
+comb_leads = read_xlsx("E:/Manipal/Data Visualization/Data Set/Case Study/Combined_source_wise_leads_addmission.xlsx",sheet = 1)
+df = comb_leads[-c(30,31,32),c(1,2,3)]
+df = df %>% mutate(not_enrolled = Lead.count-Enroll_count)
+df = df %>% mutate(per_not_enrolled = not_enrolled/Lead.count*100)
+df = df %>% mutate(per_enrolled = Enroll_count/Lead.count*100)
+df = df %>% mutate(neg_not_enrolled = -1*not_enrolled)
+a = df %>% arrange(-Enroll_count) %>% head(10)
+rev = read_xlsx("E:/Manipal/Data Visualization/Data Set/Case Study/final_revenue.xlsx",sheet = 1)
+combinedleads = read_xlsx("E:/Manipal/Data Visualization/Data Set/Case Study/fullcombinedleads.xlsx",sheet = 1)
+p = read.csv("E:/Manipal/Data Visualization/Data Set/Case Study/leadStatus.csv")
+sub = read.csv("E:/Manipal/Data Visualization/Data Set/Case Study/sub.csv")
+quaterly_lead = read.csv("E:/Manipal/Data Visualization/Data Set/Case Study/quaterly_lead.csv")
+quaterly_lead1 <- quaterly_lead %>% group_by(`Assigned.To`) %>% summarise(count = n(), course_count = length(unique(Course))) %>% arrange(-count) %>% head(10)
+combinedleads$zz<-as.Date(combinedleads$`Callback/Followup Date`) - as.Date(combinedleads$`Recent Enquired Date`)
+newdf<-combinedleads%>%group_by(`Assigned To`)%>%select(zz,Status)
+newdf<-na.omit(newdf)
+newdf2<-newdf%>%group_by(`Assigned To`)%>%summarise(zmean=round(mean(zz),2))
+```
+
+Enrollment 
+=============================
+
+Column {.tabset}
+-----------------------------------------------------------------------
+
+### Source wise enrollment count
+
+```{r fig.width=10,fig.height=6}
+f1 = ggplot()+geom_bar(data = a,aes(x = reorder(Source.Name,-Enroll_count),y = Enroll_count,fill = I("green")),stat = "identity")+ geom_bar(data = a,aes(x = reorder(Source.Name,neg_not_enrolled),y = neg_not_enrolled,fill = I("red"),width = 0.5),stat = "identity")+theme_bw()+geom_text(data = a,aes(x = reorder(Source.Name,-Enroll_count),y = Enroll_count,label = Enroll_count),position = position_stack(vjust = 1.5))+geom_text(data = a,aes(x = reorder(Source.Name,neg_not_enrolled),y = neg_not_enrolled,label = not_enrolled),position = position_stack(vjust = 0.5))
+f2 = f1+theme(axis.title.y = element_blank(),axis.ticks.y = element_blank(),axis.text.y = element_blank())
+f3 = f2+labs(x = "Source",title = "Divergent Bar plot " ,subtitle = "Number of enrolled and not enrolled source wise")
+f3
+
+```
+
+### Percentage of enrollment
+
+```{r fig.width=10,fig.height=6}
+le<-df[,c(1,5,6)]
+anames = a$Source.Name
+
+meltd<-melt(le)
+
+m = meltd %>% filter(Source.Name %in% anames)
+ggplot(m,aes(Source.Name,value,fill=variable))+geom_bar(stat='identity',position='fill')+ theme(axis.text.x = element_text(angle = 90))+ 
+  geom_text(aes(label=value),hjust=10,vjust=0,position='fill')+coord_flip()
+
+```
+
+
+UTM source {data-navmenu="Revenue" data-orientation=rows}
+=============================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Highest Revenue
+
+```{r}
+
+high = sub %>%arrange(-revenue) %>%  head(1)
+valueBox(high,icon = "far fa-money-bill-alt",color = "green")
+```
+
+
+### Lowest Revenue
+
+```{r}
+low = sub %>%arrange(revenue) %>%  head(1)
+
+valueBox(low,icon = "far fa-money-bill-alt",color = "red")
+```
+
+Row
+-----------------------------
+
+### Revenue generated with respect to each UTM source
+```{r}
+names(sub)[2]="Revenue"
+sub$UTM.Source = tolower(sub$UTM.Source)
+wordcloud(words = sub$UTM.Source,freq = sub$Revenue, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35,
+          colors=brewer.pal(8, "Dark2"))
+```
+
+
+
+80-20 rule {data-navmenu="Revenue"}
+====================================
+
+Column
+------------------------------------
+
+### Number of students getting enrolled for different courses and the amount of revenue
+
+```{r fig.width=10,fig.height=6}
+
+t1<-rev %>% filter(admission>0 & rev$Description=="Payment Transaction Success.") %>% group_by(`Course Title`) %>% summarise(counts=n(), Revenue=sum(Amount)) %>% arrange(-Revenue)
+
+t1$Cfreq=cumsum(t1$Revenue*100/sum(t1$Revenue))
+
+ggplot(t1,aes(x=reorder(`Course Title`,Cfreq),fill=I('steel blue')))+ geom_bar(aes(y =Cfreq),stat = 'identity')+ 
+  xlab('COURSE NAMES')+ylab("Percent Contribution to total Revenue") +
+  geom_hline(yintercept = 80, linetype="dashed", color = "red")+coord_flip()+
+  theme_bw()+labs(title = "Pareto Chart",subtitle = "20% of the courses contributing to 80% of revenue")
+
+
+```
+
+
+
+Orders failed {data-navmenu="Revenue"}
+===========================
+
+Column
+---------------------------------------------
+
+### Total Orders failed per Councelor
+
+```{r fig.width=10,fig.height=6}
+
+tt<-rev %>% filter(admission>0 & (rev$Description=="Payment Transaction Failure." |rev$Description=="Payment Transaction Pending." |rev$Description=="Payment Transaction Canceled.")) %>% group_by(`Counselor Name`) %>% summarise(counts=n()) %>% arrange(-counts)
+
+
+ggplot(tt,aes(x = reorder(`Counselor Name`,counts),y = counts))+geom_point()+geom_segment(aes(x = `Counselor Name`,xend = `Counselor Name`,y = 0,yend = counts))+coord_flip()+geom_text(aes(label = counts),hjust=-0.5)+theme_bw()+theme(axis.title.x = element_blank(),axis.text.x = element_blank(),axis.ticks.x = element_blank())+labs(x = "Counselor Name",title = "Lolipop Plot",subtitle ="Counselor for whom most of orders are getting failed")
+
+```
+
+Revenue and Call {data-navmenu="Revenue"}
+===========================
+
+Column
+----------------------------------------------------
+
+### Revenue and Call made by top 10 Counselors
+
+```{r}
+
+t<-rev %>% filter(admission>0 & rev$Description=="Payment Transaction Success.") %>%  group_by(`Counselor Name`) %>% summarise(counts=n(), Revenue=sum(Amount)) %>% arrange(-Revenue) %>% head(10)
+
+names(t)[2]="No. of Calls"
+ggplotly(ggplot(t,aes(x = `No. of Calls`, y =Revenue ,col = `Counselor Name` ))+geom_point(aes(size = Revenue)))
+
+
+```
+
+
+Stratagy 1 {data-navmenu="Work force Stratagy"}
+=====================================
+
+Column
+-------------------------------------
+
+### Office timings
+
+```{r fig.width=10,fig.height=6}
+
+test=as.POSIXct(combinedleads$`Recent Enquired Date`)
+combinedleads$hour=strftime(test, format="%H")
+
+ggplot(combinedleads) + aes(x = hour) + geom_bar(fill='steelblue') +xlab("Hours of the Day")+ ylab("Count of Incoming Queries") +theme_bw() + ggtitle("Office Timings")
+
+```
+
+
+Stratagy 2 {data-navmenu="Work force Stratagy"}
+=====================================
+
+Column
+-------------------------------------
+
+### Best days to take in leave applications
+
+```{r fig.width=10,fig.height=6}
+
+combinedleads$Weekday <- weekdays(as.Date(combinedleads$`Assigned On`, '%d/%m/%Y'))
+
+ggplot(combinedleads) + aes(x = Weekday) +   geom_bar(aes(fill = Weekday), width = .6) + ylab("Count of Incoming queries") +theme_bw() + ggtitle("Frequency of Calls in the Weekdays")+ theme(legend.position="none") + theme(axis.title.x=element_blank())
+
+```
+
+
+
+
+Stratagy 3 {data-navmenu="Work force Stratagy" data-orientation=rows}
+=====================================
+
+Row
+-------------------------------------
+
+### Admission Taken
+```{r}
+
+valueBox(p[1,2],icon = "fa fa-phone",color = "red")
+```
+
+
+
+### Already Applied
+```{r}
+
+valueBox(p[2,2],icon = "fa fa-phone",color = "maroon")
+```
+
+Row
+-------------------------------------
+```{r}
+
+leadPlot = read_xlsx("E:/Manipal/Data Visualization/Data Set/Case Study/New_imputed.xlsx",sheet = 1)
+
+lead = data.frame(leadPlot)
+
+lead1 = lead %>% select(Course,Phone,City,Status) %>% filter(Status %in% c("Already Applied","Admission Taken")) %>% group_by(Course,Phone,City)
+
+New_lead = data.frame(lead1)
+
+df = New_lead
+
+df_lead = data.frame(lapply(df, function(v) {
+  if (is.character(v)) return(toupper(v))
+  else return(v)
+}))
+
+
+data1 = df_lead %>% group_by(City) %>% summarise(count = n()) %>% arrange(-count) %>% head(10)
+
+ggplot(data1,aes(x = reorder(City,count),y=count,fill = I("steel blue"))) + geom_bar(stat = 'identity')+coord_flip()+theme_bw()+geom_text(aes(label=count),hjust=5)+labs(x = "City",y = "Student count")+theme(axis.text.x = element_blank(),axis.ticks.x = element_blank())
+
+USPersonalExpenditure <- data.frame("Categorie" = rownames(USPersonalExpenditure), USPersonalExpenditure)
+data <- USPersonalExpenditure[, c('Categorie', 'X1960')]
+
+data <- data1[, c('City', 'count')]
+
+colors <- c('rgb(211,94,96)', 'rgb(128,133,133)', 'rgb(144,103,167)', 'rgb(171,104,87)', 'rgb(114,147,203)')
+
+p <- plot_ly(data, labels = ~City, values = ~count, type = 'pie',
+             textposition = 'inside',
+             textinfo = 'label+percent',
+             insidetextfont = list(color = '#FFFFFF'),
+             hoverinfo = 'text',
+             text = ~paste('#', count,"Student count"),
+             marker = list(colors = colors,
+                           line = list(color = '#FFFFFF', width = 1)),
+             #The 'pull' attribute can also be used to create space between the sectors
+             showlegend = FALSE) %>%
+  layout(title = 'Top Ten City Based on Addmission',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+
+p
+
+```
+
+
+Stratagy 4 {data-navmenu="Work force Stratagy"}
+=====================================
+
+Column
+-------------------------------------
+
+###Unique courses versus total course
+
+```{r}
+ggplotly(ggplot(quaterly_lead1,aes(x = course_count, y = count,col = Assigned.To))+geom_point(aes(size = count))+labs(x = "Unique Courses", y = "Total course count")+theme(legend.title = element_blank()))
+```
+
+
+Stratagy 5 {data-navmenu="Work force Stratagy"}
+=====================================
+
+Column
+-------------------------------------
+
+### Average response time for Call Back 
+
+```{r fig.width=10,fig.height=6}
+
+ggplot(newdf2) + geom_bar(stat = "identity" ,aes(x = newdf2$`Assigned To`, y = zmean, fill = zmean >0&zmean<5))+ theme_bw()+ ylab("Average No.Days for Response") + xlab("Employee")+ ggtitle("Average response time by employee for Callbacks and Interested Candidates") + coord_flip()+ theme(legend.position = "none")
+
+```
+
+
+
